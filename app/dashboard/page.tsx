@@ -30,8 +30,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
-    supabase.from("activities").select("id, title, type, is_published").order("updated_at", { ascending: false }).then(({ data }) => {
-      if (data) setSavedActivities(data as Array<{ id: string; title: string; type: ActivityType; is_published: boolean }>);
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase.from("activities").select("id, title, type, is_published").eq("teacher_id", user.id).order("updated_at", { ascending: false }).then(({ data }) => {
+        if (data) setSavedActivities(data as Array<{ id: string; title: string; type: ActivityType; is_published: boolean }>);
+      });
     });
   }, []);
 
@@ -82,7 +85,8 @@ export default function DashboardPage() {
     setLoadingSaved(true);
     setError("");
     const supabase = createSupabaseBrowserClient();
-    const { data, error: loadError } = await supabase.from("activities").select("content, type").eq("id", id).single();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error: loadError } = user ? await supabase.from("activities").select("content, type").eq("id", id).eq("teacher_id", user.id).single() : { data: null, error: new Error("Please sign in again.") };
     if (loadError) setError(loadError.message);
     else if (data?.content) { setActivity(data.content as Activity); setSelectedActivityId(id); }
     setLoadingSaved(false);
@@ -90,15 +94,22 @@ export default function DashboardPage() {
 
   async function togglePublished(id: string, published: boolean) {
     const supabase = createSupabaseBrowserClient();
-    const { error: publishError } = await supabase.from("activities").update({ is_published: !published }).eq("id", id);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error: publishError } = user ? await supabase.from("activities").update({ is_published: !published }).eq("id", id).eq("teacher_id", user.id) : { error: new Error("Please sign in again.") };
     if (publishError) setSaveMessage(publishError.message);
     else { setSavedActivities(savedActivities.map((item) => item.id === id ? { ...item, is_published: !published } : item)); setSaveMessage(!published ? "Activity published." : "Activity unpublished."); }
+  }
+
+  async function copyShareLink(id: string) {
+    await navigator.clipboard.writeText(`${window.location.origin}/a/${id}`);
+    setSaveMessage("Share link copied.");
   }
 
   async function deleteActivity(id: string) {
     if (!window.confirm("Delete this activity permanently?")) return;
     const supabase = createSupabaseBrowserClient();
-    const { error: deleteError } = await supabase.from("activities").delete().eq("id", id);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error: deleteError } = user ? await supabase.from("activities").delete().eq("id", id).eq("teacher_id", user.id) : { error: new Error("Please sign in again.") };
     if (deleteError) setSaveMessage(deleteError.message);
     else { setSavedActivities(savedActivities.filter((item) => item.id !== id)); if (selectedActivityId === id) { setSelectedActivityId(null); setActivity(null); } setSaveMessage("Activity deleted."); }
   }
@@ -119,7 +130,7 @@ export default function DashboardPage() {
           <p className="helper-text">Your request is sent to the server. Generated content is validated before it appears here.</p>
         </form>
         <section className="preview-area"><div className="preview-label">Live preview</div>{activity ? <><ActivityRenderer activity={activity} /><div className="preview-actions"><button className="generate-button" onClick={saveActivity}>Save activity</button>{saveMessage && <span className="save-message">{saveMessage}</span>}</div><div className="refine-card"><label htmlFor="refinement">Refine with AI</label><div className="refine-row"><input id="refinement" value={refinement} onChange={(event) => setRefinement(event.target.value)} placeholder="Make question 3 harder..." /><button className="secondary-button" onClick={refine} disabled={busy || !refinement.trim()}>Refine</button></div></div><ActivityEditor activity={activity} onChange={(updated) => { setActivity(updated); setSaveMessage("Edits ready to save."); }} /></> : <div className="empty-preview"><span>✦</span><h2>Your activity will appear here</h2><p>Choose a type, describe your lesson, and generate a preview.</p></div>}
-          <div className="saved-card"><div className="saved-heading"><h2>Saved activities</h2><span>{savedActivities.length}</span></div>{savedActivities.length === 0 ? <p className="saved-empty">Your saved activities will appear here.</p> : <div className="saved-list">{savedActivities.map((saved) => <div className="saved-row" key={saved.id}><button className="saved-open" onClick={() => loadActivity(saved.id)} disabled={loadingSaved}><strong>{saved.title}</strong><small>{labels[saved.type]}</small></button><div className="saved-controls"><button className="publish-button" onClick={() => togglePublished(saved.id, saved.is_published)}>{saved.is_published ? "Unpublish" : "Publish"}</button>{saved.is_published && <a href={`/a/${saved.id}`} target="_blank" rel="noreferrer">Open link</a>}<button className="delete-button" onClick={() => deleteActivity(saved.id)}>Delete</button></div></div>)}</div>}</div>
+          <div className="saved-card"><div className="saved-heading"><h2>Saved activities</h2><span>{savedActivities.length}</span></div>{savedActivities.length === 0 ? <p className="saved-empty">Your saved activities will appear here.</p> : <div className="saved-list">{savedActivities.map((saved) => <div className="saved-row" key={saved.id}><button className="saved-open" onClick={() => loadActivity(saved.id)} disabled={loadingSaved}><strong>{saved.title}</strong><small>{labels[saved.type]}</small></button><div className="saved-controls"><button className="publish-button" onClick={() => togglePublished(saved.id, saved.is_published)}>{saved.is_published ? "Unpublish" : "Publish"}</button>{saved.is_published && <><button className="publish-button" onClick={() => copyShareLink(saved.id)}>Copy link</button><a href={`/a/${saved.id}`} target="_blank" rel="noreferrer">Open link</a></>}<button className="delete-button" onClick={() => deleteActivity(saved.id)}>Delete</button></div></div>)}</div>}</div>
         </section>
       </div>
     </main>

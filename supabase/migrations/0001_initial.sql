@@ -26,6 +26,24 @@ create table public.activities (
   updated_at timestamptz not null default now()
 );
 
+-- Creates the matching teacher profile whenever Supabase Auth creates a user.
+create or replace function public.handle_new_teacher()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.teachers (id, display_name)
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name', ''))
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_teacher();
+
 create index activities_teacher_id_updated_at_idx
   on public.activities (teacher_id, updated_at desc);
 
